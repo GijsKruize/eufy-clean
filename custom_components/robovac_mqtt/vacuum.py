@@ -146,7 +146,7 @@ class RoboVacMQTTEntity(StateVacuumEntity):
 
     async def async_send_command(
         self,
-        command: Literal['scene_clean', 'room_clean','set_clean_param'],
+        command: Literal['scene_clean', 'room_clean','set_clean_param','schedule_rooms_clean'],
         params: dict | list | None = None,
         **kwargs,
     ) -> None:
