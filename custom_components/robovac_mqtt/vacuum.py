@@ -167,6 +167,34 @@ class RoboVacMQTTEntity(StateVacuumEntity):
             if not isinstance(params, dict):
                 raise ValueError("params must be a dict for set_clean_param")
             await self.vacuum.set_clean_param(params)
+        elif command == "schedule_rooms_clean":
+            if not isinstance(params, dict) or "rooms" not in params:
+                raise ValueError("params['rooms'] is required for schedule_rooms_clean")
+            rooms_raw = params["rooms"]
+            if not isinstance(rooms_raw, list) or not rooms_raw:
+                raise ValueError("params['rooms'] must be a non-empty list")
+
+            # Optional fields
+            map_id = params.get("map_id", None)
+
+            # Normalize strings to upper for enum names
+            def _norm(v): return v.upper().strip() if isinstance(v, str) else v
+
+            clean_type = _norm(params.get("clean_type"))
+            mop_mode = _norm(params.get("mop_mode"))
+            clean_extent = _norm(params.get("clean_extent"))
+            fan = params.get("fan")
+
+            rooms = [int(r) for r in rooms_raw]
+            await self.vacuum.schedule_rooms_clean(
+                rooms,
+                map_id=int(map_id) if map_id is not None else None,
+                clean_type=clean_type,
+                mop_mode=mop_mode,
+                clean_extent=clean_extent,
+                fan=fan,
+            )
+            return
         else:
             raise NotImplementedError(f"Command {command} not implemented")
 

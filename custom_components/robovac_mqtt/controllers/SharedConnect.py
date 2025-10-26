@@ -9,9 +9,9 @@ from ..constants.state import (EUFY_CLEAN_CLEAN_SPEED, EUFY_CLEAN_CONTROL,
                                EUFY_CLEAN_NOVEL_CLEAN_SPEED)
 from ..proto.cloud.clean_param_pb2 import (CleanExtent, CleanParamRequest,
                                            CleanParamResponse, CleanType,
-                                           MopMode)
+                                           MopMode, Fan)
 from ..proto.cloud.control_pb2 import (ModeCtrlRequest, ModeCtrlResponse,
-                                       SelectRoomsClean)
+                                       SelectRoomsClean, ScheduleRoomsClean)
 from ..proto.cloud.station_pb2 import (StationRequest, ManualActionCmd)
 from ..proto.cloud.error_code_pb2 import ErrorCode
 from ..proto.cloud.work_status_pb2 import WorkStatus
@@ -260,6 +260,86 @@ class SharedConnect(Base):
             map_id=map_id,
         )
         value = encode_message(ModeCtrlRequest(method=EUFY_CLEAN_CONTROL.START_SELECT_ROOMS_CLEAN, select_rooms_clean=rooms_clean))
+        return await self.send_command({self.dps_map['PLAY_PAUSE']: value})
+
+    async def schedule_rooms_clean(
+        self,
+        room_ids: list[int],
+        map_id: int | None = None,
+        *,
+        clean_type: str | None = None,      # SWEEP_ONLY | MOP_ONLY | SWEEP_AND_MOP
+        mop_mode: str | None = None,        # LOW | MEDIUM | HIGH (only when mopping)
+        clean_extent: str | None = None,    # enum from CleanExtent
+        fan: str | int | None = None        # Fan level (enum name or int)
+    ):
+        """
+        Build and send a START_SCHEDULE_ROOMS_CLEAN request that includes
+        per-job params (clean_type, mop_mode, fan, clean_extent).
+        """
+
+        # Normalize strings to UPPERCASE
+        def _norm(v): return v.upper().strip() if isinstance(v, str) else v
+
+        clean_type = _norm(clean_type)
+        mop_mode = _norm(mop_mode)
+        clean_extent = _norm(clean_extent)
+        fan = _norm(fan)
+
+        # Build rooms list
+        rooms = [ScheduleRoomsClean.Room(id=int(r), order=i + 1) for i, r in enumerate(room_ids)]
+
+        # Optional enum lookups (only include when provided)
+        ct_msg = {}
+        if clean_type:
+            if clean_type not in CleanType.Value.keys():
+                raise ValueError(f"Invalid clean_type: {clean_type}. Allowed: {list(CleanType.Value.keys())}")
+            ct_msg = {'value': CleanType.Value.DESCRIPTOR.values_by_name[clean_type].number}
+
+        ce_msg = {}
+        if clean_extent:
+            if clean_extent not in CleanExtent.Value.keys():
+                raise ValueError(f"Invalid clean_extent: {clean_extent}. Allowed: {list(CleanExtent.Value.keys())}")
+            ce_msg = {'value': CleanExtent.Value.DESCRIPTOR.values_by_name[clean_extent].number}
+
+        mm_msg = {}
+        if mop_mode:
+            if mop_mode not in MopMode.Level.keys():
+                raise ValueError(f"Invalid mop_mode: {mop_mode}. Allowed: {list(MopMode.Level.keys())}")
+            mm_msg = {'level': MopMode.Level.DESCRIPTOR.values_by_name[mop_mode].number}
+
+        fan_msg = {}
+        if fan is not None:
+            # allow either numeric level or enum name
+            if isinstance(fan, int):
+                # common levels are 0..3; device-dependent. We trust caller here.
+                fan_msg = {'level': fan}
+            else:
+                # enum name path
+                if not hasattr(Fan, 'Level') or (fan not in Fan.Level.keys()):
+                    raise ValueError(
+                        f"Invalid fan level: {fan}. "
+                        f"Allowed: {list(getattr(Fan, 'Level').keys()) if hasattr(Fan, 'Level') else 'device-dependent'}"
+                    )
+                fan_msg = {'level': Fan.Level.DESCRIPTOR.values_by_name[fan].number}
+
+        sched = ScheduleRoomsClean(
+            rooms=rooms,
+            # map_id is optional; only include if caller provides one
+            **({'map_id': int(map_id)} if map_id is not None else {}),
+            # The *_msg dicts are protobuf submessages; pass as mappings
+            **({'clean_type': ct_msg} if ct_msg else {}),
+            **({'mop_mode': mm_msg} if mm_msg else {}),
+            **({'fan': fan_msg} if fan_msg else {}),
+            **({'clean_extent': ce_msg} if ce_msg else {}),
+            # releases is optional; omit unless you know you need it
+        )
+
+        req = ModeCtrlRequest(
+            method=EUFY_CLEAN_CONTROL.START_SCHEDULE_ROOMS_CLEAN,
+            sche_rooms_clean=sched
+        )
+
+        value = encode_message(req)
         return await self.send_command({self.dps_map['PLAY_PAUSE']: value})
 
     async def set_clean_param(self, config: dict[str, Any]):

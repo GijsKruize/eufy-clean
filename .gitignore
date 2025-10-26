@@ -2,6 +2,7 @@ build
 out
 .git
 node_modules
+.idea/
 # build
 *.tgz
 .DS_Store
